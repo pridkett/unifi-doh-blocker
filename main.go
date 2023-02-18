@@ -1,9 +1,7 @@
 package main
 
 import (
-	"bytes"
 	"flag"
-	"fmt"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -23,6 +21,7 @@ type Config struct {
 		User     string
 		Password string
 		Host     string
+		Site     string
 	}
 	Output struct {
 		Groups []OutputGroups
@@ -36,6 +35,9 @@ type OutputGroups struct {
 
 func main() {
 	var config Config
+	var ipv4GroupName string
+	var ipv6GroupName string
+
 	configFile := flag.String("config", "config.toml", "config file")
 	flag.Parse()
 
@@ -53,10 +55,72 @@ func main() {
 		}
 	}
 
+	for _, group := range config.Output.Groups {
+		if group.Type == "ipv4" {
+			ipv4GroupName = group.Name
+		}
+		if group.Type == "ipv6" {
+			ipv6GroupName = group.Name
+		}
+	}
+
 	hostList := createHostList(config.Input.Lists)
 	ipv4, ipv6 := lookupAllHosts(hostList)
 	log.Infof("IPv4 Hosts: %d", len(ipv4))
 	log.Infof("IPv6 Hosts: %d", len(ipv6))
+
+	_, err := UnifiLogin(config.Unifi.User, config.Unifi.Password, config.Unifi.Host)
+	if err != nil {
+		log.Errorf("Could not login to Unifi Controller: %s", err)
+	}
+
+	firewallGroupResponse, err := UnifiGetFirewallGroups(config.Unifi.Host)
+	if err != nil {
+		log.Errorf("Could not retrieve firewall groups from Unifi Controller: %s", err)
+	}
+
+	var ipv4Group UnifiFirewallGroup
+	var ipv6Group UnifiFirewallGroup
+
+	for _, group := range firewallGroupResponse.Data {
+		if group.Name == ipv4GroupName {
+			ipv4Group = group
+		}
+		if group.Name == ipv6GroupName {
+			ipv6Group = group
+		}
+	}
+
+	if ipv4Group.Name != "" {
+		ipv4Group.GroupMembers = make([]string, 0)
+		for _, ip := range ipv4 {
+			ipv4Group.GroupMembers = append(ipv4Group.GroupMembers, ip.String())
+		}
+		log.Infof("Updating firewall group \"%s\" with %d hosts", ipv4Group.Name, len(ipv4Group.GroupMembers))
+		_, err := UnifiUpdateFirewallGroup(config.Unifi.Host, ipv4Group)
+		if err != nil {
+			log.Errorf("Error updating firewall group: %s", err)
+		}
+		// respString, _ := json.Marshal(resp)
+		// log.Debugf("response: %s", string(respString))
+	} else {
+		log.Infof("no IPv4 output group found")
+	}
+
+	if ipv6Group.Name != "" {
+		ipv6Group.GroupMembers = make([]string, 0)
+		for _, ip := range ipv6 {
+			ipv6Group.GroupMembers = append(ipv6Group.GroupMembers, ip.String())
+		}
+		log.Infof("Updating firewall group \"%s\" with %d hosts", ipv6Group.Name, len(ipv6Group.GroupMembers))
+		_, err := UnifiUpdateFirewallGroup(config.Unifi.Host, ipv6Group)
+		if err != nil {
+			log.Errorf("Error updating firewall group: %s", err)
+		}
+	} else {
+		log.Infof("no IPv6 output group found")
+	}
+
 }
 
 // given a list of URLs, fetches those URLs and dedups the results
@@ -106,6 +170,9 @@ func createHostList(lists []string) []string {
 }
 
 func lookupAllHosts(hostnames []string) ([]net.IP, []net.IP) {
+	var ipv4Map = make(map[string]net.IP)
+	var ipv6Map = make(map[string]net.IP)
+
 	ipv4 := make([]net.IP, 0)
 	ipv6 := make([]net.IP, 0)
 
@@ -114,7 +181,25 @@ func lookupAllHosts(hostnames []string) ([]net.IP, []net.IP) {
 		ipv4 = append(ipv4, thisIPv4...)
 		ipv6 = append(ipv6, thisIPv6...)
 	}
-	return ipv4, ipv6
+
+	// use a map to de-duplicate the IP addresses
+	// this is required because Unifi will throw an error otherwise
+	for _, ip := range ipv4 {
+		ipv4Map[ip.String()] = ip
+	}
+	for _, ip := range ipv6 {
+		ipv6Map[ip.String()] = ip
+	}
+
+	return maps.Values(ipv4Map), maps.Values(ipv6Map)
+}
+
+func checkIPv4Address(addr net.IP) bool {
+	return addr.String() != "0.0.0.0"
+}
+
+func checkIPv6Address(addr net.IP) bool {
+	return addr.String() != "::"
 }
 
 // lookup a hostname and get all of the IP addreses associated with it
@@ -130,21 +215,15 @@ func lookupHost(hostname string) ([]net.IP, []net.IP) {
 	for _, ip := range ips {
 		if ip.To4() != nil {
 			log.Debugf("IPv4 %s: %s\n", hostname, ip)
-			ipv4 = append(ipv4, ip)
+			if checkIPv4Address(ip) {
+				ipv4 = append(ipv4, ip)
+			}
 		} else {
 			log.Debugf("IPv6 %s: %s\n", hostname, ip)
-			ipv6 = append(ipv6, ip)
+			if checkIPv6Address(ip) {
+				ipv6 = append(ipv6, ip)
+			}
 		}
 	}
 	return ipv4, ipv6
-}
-
-// perform a REST request to authorize against the Unifi system
-func authorizeRequest(username string, password string, hostname string) {
-	body := []byte(fmt.Sprintf(`{"username":"%s","password":"%s", "remember":true}`, username, password))
-	resp, err := http.Post(fmt.Sprintf("%s/api/auth/login", hostname), "application/json", bytes.NewBuffer(body))
-	if err != nil {
-		log.Fatalln(err)
-	}
-	fmt.Printf("Response: %s", resp)
 }
