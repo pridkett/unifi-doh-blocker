@@ -114,6 +114,12 @@ func main() {
 		log.Infof("no IPv4 output group found")
 	}
 
+	_, err = UnifiLogin(config.Unifi.User, config.Unifi.Password, config.Unifi.Host)
+	if err != nil {
+		log.Errorf("Could not login to Unifi Controller: %s", err)
+		os.Exit(1)
+	}
+
 	if ipv6Group.Name != "" {
 		ipv6Group.GroupMembers = make([]string, 0)
 		for _, ip := range ipv6 {
