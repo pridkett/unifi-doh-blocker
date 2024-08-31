@@ -286,9 +286,14 @@ func UnifiUpdateFirewallGroup(url string, firewallGroup UnifiFirewallGroup) (Uni
 	}
 	defer resp.Body.Close()
 
-	body, _ = ioutil.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return firewallGroupResponse, fmt.Errorf("API returned non-OK status: %d", resp.StatusCode)
+	}
 
-	if err := json.Unmarshal(body, &firewallGroupResponse); err != nil {
+	respBody, _ := ioutil.ReadAll(resp.Body)
+	log.Debugf("Update firewall group response: %s", string(respBody))
+
+	if err := json.Unmarshal(respBody, &firewallGroupResponse); err != nil {
 		return firewallGroupResponse, err
 	}
 
