@@ -72,6 +72,7 @@ func main() {
 	_, err := UnifiLogin(config.Unifi.User, config.Unifi.Password, config.Unifi.Host)
 	if err != nil {
 		log.Errorf("Could not login to Unifi Controller: %s", err)
+		os.Exit(1)
 	}
 
 	firewallGroupResponse, err := UnifiGetFirewallGroups(config.Unifi.Host)
@@ -89,6 +90,12 @@ func main() {
 		if group.Name == ipv6GroupName {
 			ipv6Group = group
 		}
+	}
+
+	_, err = UnifiLogin(config.Unifi.User, config.Unifi.Password, config.Unifi.Host)
+	if err != nil {
+		log.Errorf("Could not login to Unifi Controller: %s", err)
+		os.Exit(1)
 	}
 
 	if ipv4Group.Name != "" {
