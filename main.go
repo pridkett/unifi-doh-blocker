@@ -41,7 +41,7 @@ func main() {
 	configFile := flag.String("config", "config.toml", "config file")
 	flag.Parse()
 
-	log.SetLevel(log.DebugLevel)
+	log.SetLevel(log.InfoLevel)
 
 	if *configFile != "" {
 		f, err := os.Open(*configFile)
@@ -206,6 +206,10 @@ func checkIPv6Address(addr net.IP) bool {
 func lookupHost(hostname string) ([]net.IP, []net.IP) {
 	var ipv4 []net.IP
 	var ipv6 []net.IP
+
+	if strings.TrimSpace(hostname) == "" {
+		return ipv4, ipv6
+	}
 
 	ips, err := net.LookupIP(hostname)
 	if err != nil {

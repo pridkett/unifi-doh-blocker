@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 
 	log "github.com/sirupsen/logrus"
@@ -140,7 +140,7 @@ func UnifiLogin(username string, password string, url string) (UnifiLoginRespons
 	}
 	defer resp.Body.Close()
 
-	body, _ = ioutil.ReadAll(resp.Body)
+	body, _ = io.ReadAll(io.Reader(resp.Body))
 	// fmt.Printf("Response: %s", string(body))
 	if err := json.Unmarshal(body, &loginResponse); err != nil {
 		return loginResponse, err
@@ -173,7 +173,7 @@ func UnifiGetSites(url string) (UnifiSitesResponse, error) {
 	}
 	defer resp.Body.Close()
 
-	body, _ := ioutil.ReadAll(resp.Body)
+	body, _ := io.ReadAll(io.Reader(resp.Body))
 
 	if err := json.Unmarshal(body, &sitesResponse); err != nil {
 		return sitesResponse, err
@@ -184,13 +184,23 @@ func UnifiGetSites(url string) (UnifiSitesResponse, error) {
 	return sitesResponse, nil
 }
 
-func extractCSRFToken(resp *http.Response) {
-	CSRFToken = resp.Header.Get("X-CSRF-Token")
+func extractCSRFToken(resp *http.Response) (string, string) {
+	token := resp.Header.Get("X-CSRF-Token")
+	log.Debug("X-CSRF-Token Header: ", token)
+
+	if token != "" {
+		CSRFToken = token
+	}
+
 	for _, cookie := range resp.Cookies() {
 		if cookie.Name == "TOKEN" {
 			CookieToken = cookie.Value
+			return CSRFToken, CookieToken
 		}
 	}
+
+	log.Warn("No TOKEN cookie found in response")
+	return CSRFToken, ""
 }
 
 func UnifiGetFirewallGroups(url string) (UnifiFirewallGroupResponse, error) {
@@ -215,7 +225,7 @@ func UnifiGetFirewallGroups(url string) (UnifiFirewallGroupResponse, error) {
 	}
 	defer resp.Body.Close()
 
-	body, _ := ioutil.ReadAll(resp.Body)
+	body, _ := io.ReadAll(io.Reader(resp.Body))
 
 	if err := json.Unmarshal(body, &firewallGroupResponse); err != nil {
 		return firewallGroupResponse, err
@@ -250,7 +260,7 @@ func UnifiCreateFirewallGroup(url string, firewallGroup UnifiFirewallGroup) (Uni
 	}
 	defer resp.Body.Close()
 
-	body, _ = ioutil.ReadAll(resp.Body)
+	body, _ = io.ReadAll(io.Reader(resp.Body))
 
 	if err := json.Unmarshal(body, &firewallGroupResponse); err != nil {
 		return firewallGroupResponse, err
@@ -286,8 +296,8 @@ func UnifiUpdateFirewallGroup(url string, firewallGroup UnifiFirewallGroup) (Uni
 	}
 	defer resp.Body.Close()
 
-	body, _ = ioutil.ReadAll(resp.Body)
-
+	body, _ = io.ReadAll(io.Reader(resp.Body))
+	log.Debugf("Response: %v", string(body))
 	if err := json.Unmarshal(body, &firewallGroupResponse); err != nil {
 		return firewallGroupResponse, err
 	}
