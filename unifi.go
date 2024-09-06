@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"sort"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -273,6 +275,13 @@ func UnifiCreateFirewallGroup(url string, firewallGroup UnifiFirewallGroup) (Uni
 
 func UnifiUpdateFirewallGroup(url string, firewallGroup UnifiFirewallGroup) (UnifiFirewallGroupResponse, error) {
 	var firewallGroupResponse UnifiFirewallGroupResponse
+
+	// Sort IP addresses in numerical ascending order
+	sort.Slice(firewallGroup.GroupMembers, func(i, j int) bool {
+		ip1 := net.ParseIP(firewallGroup.GroupMembers[i])
+		ip2 := net.ParseIP(firewallGroup.GroupMembers[j])
+		return bytes.Compare(ip1, ip2) < 0
+	})
 
 	body, _ := json.Marshal(firewallGroup)
 

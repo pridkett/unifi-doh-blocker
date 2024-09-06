@@ -1,3 +1,4 @@
 unifi-doh-blocker
 config.toml
 *.json
+.DS_Store
