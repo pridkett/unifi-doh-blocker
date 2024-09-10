@@ -289,6 +289,9 @@ func UnifiUpdateFirewallGroup(url string, firewallGroup UnifiFirewallGroup) (Uni
 	req.Header.Set("X-CSRF-Token", CSRFToken)
 	req.Header.Set("Cookie", "TOKEN="+CookieToken)
 
+	// log.Infof("Request: %s %s", req.Method, req.URL.String())
+	// log.Infof("Headers: %v", req.Header)
+	// log.Infof("Payload: %s", string(body))
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
