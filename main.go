@@ -22,6 +22,7 @@ type Config struct {
 		Password string
 		Host     string
 		Site     string
+		Insecure bool
 	}
 	Output struct {
 		Groups []OutputGroups
@@ -68,6 +69,9 @@ func main() {
 	ipv4, ipv6 := lookupAllHosts(hostList)
 	log.Infof("IPv4 Hosts: %d", len(ipv4))
 	log.Infof("IPv6 Hosts: %d", len(ipv6))
+
+	// Initialize UniFi HTTP client with TLS settings
+	InitUnifiClient(config.Unifi.Insecure)
 
 	_, err := UnifiLogin(config.Unifi.User, config.Unifi.Password, config.Unifi.Host)
 	if err != nil {
