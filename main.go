@@ -2,15 +2,16 @@ package main
 
 import (
 	"flag"
-	"io/ioutil"
+	"io"
+	"maps"
 	"net"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/naoina/toml"
 	log "github.com/sirupsen/logrus"
-	"golang.org/x/exp/maps"
 )
 
 type Config struct {
@@ -144,7 +145,7 @@ func createHostList(lists []string) []string {
 
 			defer response.Body.Close()
 
-			resBody, err := ioutil.ReadAll(response.Body)
+			resBody, err := io.ReadAll(response.Body)
 			if err != nil {
 				log.Errorf("Could not read response body for list at %s: %s\n", listUrl, err)
 				break
@@ -152,7 +153,7 @@ func createHostList(lists []string) []string {
 			listBody = string(resBody)
 		} else {
 			// read the file listUrl into the variable listBody
-			fileBody, err := ioutil.ReadFile(listUrl)
+			fileBody, err := os.ReadFile(listUrl)
 			if err != nil {
 				log.Errorf("Could not open file %s: %s\n", listUrl, err)
 				break
@@ -168,7 +169,7 @@ func createHostList(lists []string) []string {
 	}
 
 	// see https://stackoverflow.com/a/71635953/57626
-	hostList := maps.Keys(allHosts)
+	hostList := slices.Collect(maps.Keys(allHosts))
 	log.Infof("Total of %d de-depublicated hosts", len(hostList))
 	return hostList
 }
@@ -195,7 +196,7 @@ func lookupAllHosts(hostnames []string) ([]net.IP, []net.IP) {
 		ipv6Map[ip.String()] = ip
 	}
 
-	return maps.Values(ipv4Map), maps.Values(ipv6Map)
+	return slices.Collect(maps.Values(ipv4Map)), slices.Collect(maps.Values(ipv6Map))
 }
 
 func checkIPv4Address(addr net.IP) bool {
