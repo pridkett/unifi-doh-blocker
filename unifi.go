@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -116,20 +117,55 @@ var UnifiHTTPClient *http.Client
 
 const UnifiSite = "default"
 
+// maxResponseBytes caps how much of a controller response is read into memory
+const maxResponseBytes = 10 << 20
+
 // InitUnifiClient initializes the global UniFi HTTP client with TLS settings
 func InitUnifiClient(insecure bool) {
 	UnifiHTTPClient = createUnifiHTTPClient(insecure)
 }
 
-// createUnifiHTTPClient creates an HTTP client with optional insecure TLS
+// createUnifiHTTPClient creates an HTTP client with optional insecure TLS.
+// Redirects are refused: the API never needs them, and following one could
+// send the login body or CSRF token to another host.
 func createUnifiHTTPClient(insecure bool) *http.Client {
-	if insecure {
-		tr := &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		}
-		return &http.Client{Transport: tr}
+	client := &http.Client{
+		Timeout: httpTimeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
 	}
-	return &http.Client{}
+	if insecure {
+		tr := http.DefaultTransport.(*http.Transport).Clone()
+		tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12}
+		client.Transport = tr
+	}
+	return client
+}
+
+// unifiDo sends a request, rejects non-2xx responses, decodes the JSON body
+// into out, and records any refreshed session tokens.
+func unifiDo(req *http.Request, out any) error {
+	resp, err := UnifiHTTPClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return fmt.Errorf("%s %s: unexpected status %s", req.Method, req.URL.Path, resp.Status)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(body, out); err != nil {
+		return err
+	}
+
+	extractCSRFToken(resp)
+	return nil
 }
 
 func UnifiLogin(username string, password string, url string) (UnifiLoginResponse, error) {
@@ -138,7 +174,7 @@ func UnifiLogin(username string, password string, url string) (UnifiLoginRespons
 
 	loginRequest.Username = username
 	loginRequest.Password = password
-	loginRequest.Remember = true
+	loginRequest.Remember = false
 
 	body, _ := json.Marshal(loginRequest)
 	targetUrl := fmt.Sprintf("%s/api/auth/login", url)
@@ -153,19 +189,12 @@ func UnifiLogin(username string, password string, url string) (UnifiLoginRespons
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
 
-	resp, err := UnifiHTTPClient.Do(req)
-	if err != nil {
+	if err := unifiDo(req, &loginResponse); err != nil {
 		return loginResponse, err
 	}
-	defer resp.Body.Close()
-
-	body, _ = io.ReadAll(io.Reader(resp.Body))
-	// fmt.Printf("Response: %s", string(body))
-	if err := json.Unmarshal(body, &loginResponse); err != nil {
-		return loginResponse, err
+	if CookieToken == "" {
+		return loginResponse, errors.New("login response did not include a session token")
 	}
-
-	extractCSRFToken(resp)
 
 	return loginResponse, nil
 }
@@ -185,27 +214,12 @@ func UnifiGetSites(url string) (UnifiSitesResponse, error) {
 	req.Header.Set("X-CSRF-Token", CSRFToken)
 	req.Header.Set("Cookie", "TOKEN="+CookieToken)
 
-	resp, err := UnifiHTTPClient.Do(req)
-	if err != nil {
-		return sitesResponse, err
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(io.Reader(resp.Body))
-
-	if err := json.Unmarshal(body, &sitesResponse); err != nil {
-		return sitesResponse, err
-	}
-
-	extractCSRFToken(resp)
-
-	return sitesResponse, nil
+	err = unifiDo(req, &sitesResponse)
+	return sitesResponse, err
 }
 
 func extractCSRFToken(resp *http.Response) (string, string) {
 	token := resp.Header.Get("X-CSRF-Token")
-	log.Debug("X-CSRF-Token Header: ", token)
-
 	if token != "" {
 		CSRFToken = token
 	}
@@ -236,21 +250,8 @@ func UnifiGetFirewallGroups(url string) (UnifiFirewallGroupResponse, error) {
 	req.Header.Set("X-CSRF-Token", CSRFToken)
 	req.Header.Set("Cookie", "TOKEN="+CookieToken)
 
-	resp, err := UnifiHTTPClient.Do(req)
-	if err != nil {
-		return firewallGroupResponse, err
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(io.Reader(resp.Body))
-
-	if err := json.Unmarshal(body, &firewallGroupResponse); err != nil {
-		return firewallGroupResponse, err
-	}
-
-	extractCSRFToken(resp)
-
-	return firewallGroupResponse, nil
+	err = unifiDo(req, &firewallGroupResponse)
+	return firewallGroupResponse, err
 }
 
 func UnifiCreateFirewallGroup(url string, firewallGroup UnifiFirewallGroup) (UnifiFirewallGroupResponse, error) {
@@ -270,21 +271,8 @@ func UnifiCreateFirewallGroup(url string, firewallGroup UnifiFirewallGroup) (Uni
 	req.Header.Set("X-CSRF-Token", CSRFToken)
 	req.Header.Set("Cookie", "TOKEN="+CookieToken)
 
-	resp, err := UnifiHTTPClient.Do(req)
-	if err != nil {
-		return firewallGroupResponse, err
-	}
-	defer resp.Body.Close()
-
-	body, _ = io.ReadAll(io.Reader(resp.Body))
-
-	if err := json.Unmarshal(body, &firewallGroupResponse); err != nil {
-		return firewallGroupResponse, err
-	}
-
-	extractCSRFToken(resp)
-
-	return firewallGroupResponse, nil
+	err = unifiDo(req, &firewallGroupResponse)
+	return firewallGroupResponse, err
 }
 
 func UnifiUpdateFirewallGroup(url string, firewallGroup UnifiFirewallGroup) (UnifiFirewallGroupResponse, error) {
@@ -299,7 +287,6 @@ func UnifiUpdateFirewallGroup(url string, firewallGroup UnifiFirewallGroup) (Uni
 
 	body, _ := json.Marshal(firewallGroup)
 
-	// fmt.Printf("body: %s", string(body))
 	req, err := http.NewRequest("PUT", fmt.Sprintf("%s/proxy/network/api/s/%s/rest/firewallgroup/%s", url, UnifiSite, firewallGroup.ID), bytes.NewBuffer(body))
 	if err != nil {
 		log.Errorf("Error creating request: %v", err)
@@ -312,22 +299,6 @@ func UnifiUpdateFirewallGroup(url string, firewallGroup UnifiFirewallGroup) (Uni
 	req.Header.Set("X-CSRF-Token", CSRFToken)
 	req.Header.Set("Cookie", "TOKEN="+CookieToken)
 
-	// log.Infof("Request: %s %s", req.Method, req.URL.String())
-	// log.Infof("Headers: %v", req.Header)
-	// log.Infof("Payload: %s", string(body))
-	resp, err := UnifiHTTPClient.Do(req)
-	if err != nil {
-		return firewallGroupResponse, err
-	}
-	defer resp.Body.Close()
-
-	body, _ = io.ReadAll(io.Reader(resp.Body))
-	log.Debugf("Response: %v", string(body))
-	if err := json.Unmarshal(body, &firewallGroupResponse); err != nil {
-		return firewallGroupResponse, err
-	}
-
-	extractCSRFToken(resp)
-
-	return firewallGroupResponse, nil
+	err = unifiDo(req, &firewallGroupResponse)
+	return firewallGroupResponse, err
 }

@@ -43,6 +43,7 @@ lists = [ "https://raw.githubusercontent.com/crypt0rr/public-doh-servers/main/dn
 host = "https://YOUR.UNIFI.HOST"
 user = "LOCAL_ADMIN_USERNAME"
 password = "LOCAL_ADMIN_PASSWORD"
+# insecure = true  # only if the controller doesn't have a trusted certificate
 
 [output]
 groups = [
@@ -59,9 +60,15 @@ This only has a single field right now `lists` which is a list of URLs or filena
 
 This is the configuration for your Unifi controller. It might be a little hard-coded to be a Unifi Dream Machine Pro right now (I think there are different login URLs for the different models). The key thing is that you need a local administrator account that does not have any form of 2FA enabled.
 
+`host` must use `https://`. If your controller uses a self-signed certificate, set `insecure = true` to skip certificate verification, like `curl -k`. This exposes your credentials to anyone who can intercept the connection, so prefer installing a trusted certificate. It only applies to the controller: remote lists are always verified.
+
+This file contains your controller password, so keep it private with `chmod 600 config.toml`.
+
 ### `[output]`
 
-This specifies the Unifi firewall groups that should be modified. Right now the program requires that these groups exist, so create them in the GUI first. Each object needs two fields, the `name` of the group and a `type` variable which is either `ipv4` or `ipv6`. Right now these lists are completely overwritten and you can only have one of each kind of list.
+This specifies the Unifi firewall groups that should be modified. Right now the program requires that these groups exist, so create them in the GUI first. It exits with an error before doing any DNS lookups if they're missing. Each object needs two fields, the `name` of the group and a `type` variable which is either `ipv4` or `ipv6`. Right now these lists are completely overwritten and you can only have one of each kind of list.
+
+To avoid dropping existing blocks, nothing is changed and the program exits with an error if any list can't be read, and a group is left alone if no addresses resolved for it. Private, loopback, link-local, and multicast addresses are never added to a group, which prevents a bad list entry from blocking your own network.
 
 Applying the Rules
 ------------------

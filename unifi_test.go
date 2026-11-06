@@ -2,6 +2,8 @@ package main
 
 import (
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -76,15 +78,72 @@ func TestInitUnifiClient(t *testing.T) {
 	}
 }
 
-// Mock or minimal implementation for createUnifiHTTPClient to satisfy the tests
-// This should ideally be the actual function from unifi.go, but for isolated testing
-// of the test file itself, we might need a local version if unifi.go isn't fully available
-// or to avoid side effects. For this exercise, we assume unifi.go's function is used.
-// If unifi.go's createUnifiHTTPClient is not as expected, these tests might fail.
-// For example, if it returns a client with a custom transport that isn't *http.Transport.
+func newLoginServer(t *testing.T, handler http.HandlerFunc) *httptest.Server {
+	t.Helper()
+	server := httptest.NewTLSServer(handler)
+	t.Cleanup(server.Close)
+	CSRFToken, CookieToken = "", ""
+	return server
+}
 
-// Helper function to ensure UnifiHTTPClient is reset if tests run in parallel or affect global state.
-// This is a simplistic approach; proper test setup/teardown might be needed for complex scenarios.
-func resetGlobalClient() {
-	UnifiHTTPClient = nil
+func loginOK(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{Name: "TOKEN", Value: "session"})
+	w.Write([]byte(`{"username":"admin"}`))
+}
+
+func TestLoginSelfSignedCertificate(t *testing.T) {
+	server := newLoginServer(t, loginOK)
+
+	InitUnifiClient(false)
+	if _, err := UnifiLogin("u", "p", server.URL); err == nil {
+		t.Error("expected a verifying client to reject a self-signed certificate")
+	}
+
+	InitUnifiClient(true)
+	if _, err := UnifiLogin("u", "p", server.URL); err != nil {
+		t.Errorf("expected insecure client to accept a self-signed certificate: %v", err)
+	}
+}
+
+func TestLoginRejectsErrorStatus(t *testing.T) {
+	server := newLoginServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"error":"bad credentials"}`))
+	})
+
+	InitUnifiClient(true)
+	_, err := UnifiLogin("u", "p", server.URL)
+	if err == nil || !strings.Contains(err.Error(), "401") {
+		t.Errorf("expected a 401 error, got %v", err)
+	}
+}
+
+func TestLoginRequiresSessionToken(t *testing.T) {
+	server := newLoginServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{}`))
+	})
+
+	InitUnifiClient(true)
+	if _, err := UnifiLogin("u", "p", server.URL); err == nil {
+		t.Error("expected an error when no session token is returned")
+	}
+}
+
+func TestLoginDoesNotFollowRedirects(t *testing.T) {
+	redirected := false
+	target := newLoginServer(t, func(w http.ResponseWriter, r *http.Request) {
+		redirected = true
+		loginOK(w, r)
+	})
+	server := newLoginServer(t, func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	})
+
+	InitUnifiClient(true)
+	if _, err := UnifiLogin("u", "p", server.URL); err == nil {
+		t.Error("expected a redirect response to be an error")
+	}
+	if redirected {
+		t.Error("credentials were re-sent to the redirect target")
+	}
 }
