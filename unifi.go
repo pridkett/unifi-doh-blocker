@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -111,8 +112,25 @@ type UnifiSitesResponse struct {
 
 var CSRFToken string
 var CookieToken string
+var UnifiHTTPClient *http.Client
 
 const UnifiSite = "default"
+
+// InitUnifiClient initializes the global UniFi HTTP client with TLS settings
+func InitUnifiClient(insecure bool) {
+	UnifiHTTPClient = createUnifiHTTPClient(insecure)
+}
+
+// createUnifiHTTPClient creates an HTTP client with optional insecure TLS
+func createUnifiHTTPClient(insecure bool) *http.Client {
+	if insecure {
+		tr := &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		}
+		return &http.Client{Transport: tr}
+	}
+	return &http.Client{}
+}
 
 func UnifiLogin(username string, password string, url string) (UnifiLoginResponse, error) {
 	var loginResponse UnifiLoginResponse
@@ -135,8 +153,7 @@ func UnifiLogin(username string, password string, url string) (UnifiLoginRespons
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := UnifiHTTPClient.Do(req)
 	if err != nil {
 		return loginResponse, err
 	}
@@ -156,7 +173,7 @@ func UnifiLogin(username string, password string, url string) (UnifiLoginRespons
 func UnifiGetSites(url string) (UnifiSitesResponse, error) {
 	var sitesResponse UnifiSitesResponse
 
-	req, err := http.NewRequest("GET", fmt.Sprintf("%s/proxy/network/api/self/sites", url, UnifiSite), nil)
+	req, err := http.NewRequest("GET", fmt.Sprintf("%s/proxy/network/api/self/sites", url), nil)
 	if err != nil {
 		log.Errorf("Error creating request: %v", err)
 		return sitesResponse, err
@@ -168,8 +185,7 @@ func UnifiGetSites(url string) (UnifiSitesResponse, error) {
 	req.Header.Set("X-CSRF-Token", CSRFToken)
 	req.Header.Set("Cookie", "TOKEN="+CookieToken)
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := UnifiHTTPClient.Do(req)
 	if err != nil {
 		return sitesResponse, err
 	}
@@ -220,8 +236,7 @@ func UnifiGetFirewallGroups(url string) (UnifiFirewallGroupResponse, error) {
 	req.Header.Set("X-CSRF-Token", CSRFToken)
 	req.Header.Set("Cookie", "TOKEN="+CookieToken)
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := UnifiHTTPClient.Do(req)
 	if err != nil {
 		return firewallGroupResponse, err
 	}
@@ -255,8 +270,7 @@ func UnifiCreateFirewallGroup(url string, firewallGroup UnifiFirewallGroup) (Uni
 	req.Header.Set("X-CSRF-Token", CSRFToken)
 	req.Header.Set("Cookie", "TOKEN="+CookieToken)
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := UnifiHTTPClient.Do(req)
 	if err != nil {
 		return firewallGroupResponse, err
 	}
@@ -301,8 +315,7 @@ func UnifiUpdateFirewallGroup(url string, firewallGroup UnifiFirewallGroup) (Uni
 	// log.Infof("Request: %s %s", req.Method, req.URL.String())
 	// log.Infof("Headers: %v", req.Header)
 	// log.Infof("Payload: %s", string(body))
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := UnifiHTTPClient.Do(req)
 	if err != nil {
 		return firewallGroupResponse, err
 	}
