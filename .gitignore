@@ -2,3 +2,9 @@ unifi-doh-blocker
 config.toml
 *.json
 .DS_Store
+
+# Local credentials, session data, and scratch scripts - never commit these
+config-*.toml
+cookies.txt
+test.sh
+*~
